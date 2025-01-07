@@ -3,6 +3,7 @@ from tkinter import ttk, messagebox
 from jobspy import scrape_jobs
 import csv
 from datetime import datetime
+import pandas as pd
 
 class JobSearchApp:
     def __init__(self, root):
@@ -78,9 +79,45 @@ class JobSearchApp:
         self.progress_text.see(tk.END)
         self.root.update()
         
+        
     def search_jobs(self):
         try:
-            # [Previous validation code remains the same...]
+            # Clear previous progress
+            self.progress_text.delete(1.0, tk.END)
+            
+            # Validate inputs
+            if not self.search_term.get().strip():
+                messagebox.showerror("Error", "Please enter a search term")
+                return
+                
+            if not self.location.get().strip():
+                messagebox.showerror("Error", "Please enter a location")
+                return
+            
+            # Get selected sites
+            selected_sites = [site for site, var in self.site_vars.items() if var.get()]
+            if not selected_sites:
+                messagebox.showerror("Error", "Please select at least one job site")
+                return
+            
+            self.log_progress("Starting job search...")
+            
+            # Prepare parameters
+            params = {
+                "site_name": selected_sites,
+                "search_term": self.search_term.get().strip(),
+                "location": self.location.get().strip(),
+                "results_wanted": int(self.results_wanted.get()),
+                "hours_old": 24,  # Filter for last 24 hours
+                "country_indeed": self.country.get()
+            }
+            
+            # Add optional parameters if selected
+            if self.job_type.get():
+                params["job_type"] = self.job_type.get()
+            
+            if self.is_remote.get():
+                params["is_remote"] = True
             
             self.log_progress("Searching for jobs...")
             jobs = scrape_jobs(**params)
@@ -89,38 +126,51 @@ class JobSearchApp:
                 self.log_progress("No jobs found matching your criteria.")
                 return
             
-            # Drop unwanted columns
-            columns_to_drop = [
-                'company_industry',
-                'job_url_direct',
-                'job_type',
-                'is_remote',
-                'job_level',
-                'job_function',
-                'emails',
-                'company_url',
-                'company_logo',
-                'company_url_direct',
-                'company_addresses',
-                'company_num_employees',
-                'company_revenue',
-                'company_description'
+            # Keep important columns including date_posted
+            columns_to_keep = [
+                'site',
+                'title',
+                'company',
+                'location',
+                'date_posted',
+                'salary_min',
+                'salary_max',
+                'salary_interval',
+                'job_url',
+                'description'
             ]
             
-            # Drop columns if they exist in the DataFrame
-            jobs = jobs.drop(columns=[col for col in columns_to_drop if col in jobs.columns])
+            # Create a new DataFrame with only the columns we want
+            jobs_filtered = pd.DataFrame()
+            for col in columns_to_keep:
+                if col in jobs.columns:
+                    jobs_filtered[col] = jobs[col]
+            
+            # Format date_posted if it exists
+            if 'date_posted' in jobs_filtered.columns:
+                # Convert to datetime and handle any parsing errors
+                jobs_filtered['date_posted'] = pd.to_datetime(
+                    jobs_filtered['date_posted'], 
+                    errors='coerce'
+                )
+                # Format as string for Excel
+                jobs_filtered['date_posted'] = jobs_filtered['date_posted'].dt.strftime('%Y-%m-%d %H:%M:%S')
             
             # Generate filename with timestamp
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"job_search_results_{timestamp}.xlsx"
             
             # Export to Excel
-            jobs.to_excel(filename, index=False)
-            self.log_progress(f"Found {len(jobs)} jobs")
+            jobs_filtered.to_excel(filename, index=False)
+            
+            self.log_progress(f"Found {len(jobs_filtered)} jobs")
+            self.log_progress("Date posted information preserved in the export")
             self.log_progress(f"Results exported to: {filename}")
             
             # Show success message
-            messagebox.showinfo("Success", f"Search completed!\nFound {len(jobs)} jobs\nResults saved to {filename}")
+            messagebox.showinfo("Success", 
+                              f"Search completed!\nFound {len(jobs_filtered)} jobs\n"
+                              f"Results saved to {filename}")
             
         except Exception as e:
             self.log_progress(f"Error: {str(e)}")
